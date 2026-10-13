@@ -1,95 +1,116 @@
+require('dotenv').config();
 const express = require('express');
 const app = express();
-const PORT = 3000;
 
-// Middleware para parsear JSON en el cuerpo de las peticiones
+// Importar la conexión a la base de datos MySQL
+const db = require('./database/db');
+
+// Middleware para procesar JSON en el cuerpo de las peticiones
 app.use(express.json());
 
-// Arreglo en memoria (Base de datos simulada)
-let productos = [
-  { id: 1, nombre: 'Laptop', precio: 1200 },
-  { id: 2, nombre: 'Mouse', precio: 25 },
-  { id: 3, nombre: 'Teclado', precio: 45 }
-];
+// =================================================================
+// RUTAS REFACTORIZADAS (PARTE III)
+// =================================================================
 
-// Ruta base (/)
-app.get('/', (req, res) => {
-  res.send('Servidor en línea y funcionando correctamente.');
-});
-
-// 1. GET /api/productos - Obtener todos los productos
-app.get('/api/productos', (req, res) => {
-  res.status(200).json(productos);
-});
-
-// 2. GET /api/productos/:id - Obtener un producto por ID
-app.get('/api/productos/:id', (req, res) => {
-  const id = parseInt(req.params.id);
-  const producto = productos.find(p => p.id === id);
-
-  if (!producto) {
-    return res.status(404).json({ mensaje: 'Producto no encontrado' });
+// 1. GET - Obtener todos los productos
+app.get('/api/productos', async (req, res) => {
+  try {
+    const [rows] = await db.query('SELECT * FROM productos');
+    res.json(rows);
+  } catch (error) {
+    console.error('Error en GET /api/productos:', error);
+    res.status(500).json({ error: 'Error al obtener los datos de la base de datos' });
   }
-
-  res.status(200).json(producto);
 });
 
-// 3. POST /api/productos - Crear un nuevo producto
-app.post('/api/productos', (req, res) => {
-  const { nombre, precio } = req.body;
+// 2. GET por ID - Obtener un producto por su ID
+app.get('/api/productos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [rows] = await db.query('SELECT * FROM productos WHERE id = ?', [id]);
 
-  if (!nombre || !precio) {
-    return res.status(400).json({ mensaje: 'Nombre y precio son requeridos' });
+    if (rows.length === 0) {
+      return res.status(404).json({ mensaje: 'Producto no encontrado' });
+    }
+
+    res.json(rows[0]);
+  } catch (error) {
+    console.error('Error en GET /api/productos/:id:', error);
+    res.status(500).json({ error: 'Error al consultar el producto' });
   }
-
-  const nuevoProducto = {
-    id: productos.length > 0 ? productos[productos.length - 1].id + 1 : 1,
-    nombre,
-    precio
-  };
-
-  productos.push(nuevoProducto);
-  res.status(201).json(nuevoProducto);
 });
 
-// 4. PUT /api/productos/:id - Actualizar un producto existente
-app.put('/api/productos/:id', (req, res) => {
-  const id = parseInt(req.params.id);
-  const productoIndex = productos.findIndex(p => p.id === id);
+// 3. POST - Insertar un nuevo producto
+app.post('/api/productos', async (req, res) => {
+  try {
+    const { nombre, precio, descripcion } = req.body;
 
-  if (productoIndex === -1) {
-    return res.status(404).json({ mensaje: 'Producto no encontrado para actualizar' });
+    // Validar datos mínimos obligatorios
+    if (!nombre || !precio) {
+      return res.status(400).json({ mensaje: 'El nombre y el precio son obligatorios' });
+    }
+
+    const [result] = await db.query(
+      'INSERT INTO productos (nombre, precio, descripcion) VALUES (?, ?, ?)',
+      [nombre, precio, descripcion || null]
+    );
+
+    res.status(201).json({
+      id: result.insertId,
+      nombre,
+      precio,
+      descripcion
+    });
+  } catch (error) {
+    console.error('Error en POST /api/productos:', error);
+    res.status(500).json({ error: 'Error al guardar el producto en la base de datos' });
   }
-
-  const { nombre, precio } = req.body;
-
-  productos[productoIndex] = {
-    ...productos[productoIndex],
-    ...(nombre && { nombre }),
-    ...(precio && { precio })
-  };
-
-  res.status(200).json(productos[productoIndex]);
 });
 
-// ELIMINAR un producto por ID
-app.delete('/api/productos/:id', (req, res) => {
-  const id = parseInt(req.params.id);
-  const index = productos.findIndex(p => p.id === id);
+// 4. PUT - Actualizar un producto existente
+app.put('/api/productos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nombre, precio, descripcion } = req.body;
 
-  if (index === -1) {
-    return res.status(404).json({ mensaje: 'Producto no encontrado' });
+    const [result] = await db.query(
+      'UPDATE productos SET nombre = ?, precio = ?, descripcion = ? WHERE id = ?',
+      [nombre, precio, descripcion || null, id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ mensaje: 'Producto no encontrado para actualizar' });
+    }
+
+    res.json({ mensaje: 'Producto actualizado correctamente', id, nombre, precio, descripcion });
+  } catch (error) {
+    console.error('Error en PUT /api/productos/:id:', error);
+    res.status(500).json({ error: 'Error al actualizar el producto' });
   }
-
-  const productoEliminado = productos.splice(index, 1);
-  res.json({
-    mensaje: `Producto con ID ${id} eliminado correctamente`,
-    producto: productoEliminado[0]
-  });
 });
 
+// 5. DELETE - Eliminar un producto por su ID
+app.delete('/api/productos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
 
-// Iniciar servidor
+    const [result] = await db.query('DELETE FROM productos WHERE id = ?', [id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ mensaje: 'Producto no encontrado para eliminar' });
+    }
+
+    res.json({ mensaje: 'Producto eliminado correctamente' });
+  } catch (error) {
+    console.error('Error en DELETE /api/productos/:id:', error);
+    res.status(500).json({ error: 'Error al eliminar el producto' });
+  }
+});
+
+// =================================================================
+// INICIO DEL SERVIDOR
+// =================================================================
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Servidor escuchando en http://localhost:${PORT}`);
+  console.log(`Servidor escuchando en el puerto ${PORT}`);
 });
